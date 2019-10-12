@@ -419,6 +419,10 @@
 (require 'cl-lib)
 (require 'font-lock)
 
+(declare-function 'posframe-workable-p "ext:posframe")
+(declare-function 'posframe-show "ext:posframe")
+(declare-function 'posframe-hide "ext:posframe")
+
 (defgroup embrace nil
   "Add/Change/Delete pairs based on `expand-region'."
   :group 'editing
@@ -426,6 +430,11 @@
 
 (defvar embrace-show-help-p t
   "Whether we need to show the help buffer or not.")
+
+(defcustom embrace-use-posframe t
+  "When available, use posframe to show the help buffer."
+  :type 'boolean
+  :group 'embrace)
 
 ;; faces
 (defface embrace-help-key-face
@@ -613,6 +622,11 @@
          (avl-width (cdr max-dims)))
     (embrace--create-help-string-1 keys avl-lines avl-width)))
 
+(defun embrace--use-posframe-p ()
+  (and embrace-use-posframe
+       (fboundp #'posframe-workable-p)
+       (posframe-workable-p)))
+
 (defun embrace--setup-help-buffer ()
   (with-current-buffer
       (setq embrace--help-buffer
@@ -635,17 +649,21 @@
                                         ,body))))))
 
 (defun embrace--show-help-buffer (help-string)
+  (embrace--setup-help-buffer)
+  (with-current-buffer embrace--help-buffer
+    (erase-buffer)
+    (insert help-string)
+    (goto-char (point-min)))
   (let ((alist '((window-width . (lambda (w) (fit-window-to-buffer w nil 1)))
                  (window-height . (lambda (w) (fit-window-to-buffer w nil 1))))))
-    (embrace--setup-help-buffer)
-    (with-current-buffer embrace--help-buffer
-      (erase-buffer)
-      (insert help-string)
-      (goto-char (point-min)))
-    (if (get-buffer-window embrace--help-buffer)
-        (display-buffer-reuse-window embrace--help-buffer alist)
+    (cond
+     ((embrace--use-posframe-p)
+      (posframe-show embrace--help-buffer))
+     ((get-buffer-window embrace--help-buffer)
+      (display-buffer-reuse-window embrace--help-buffer alist))
+     (t
       (display-buffer-in-side-window
-       embrace--help-buffer alist))))
+       embrace--help-buffer alist)))))
 
 (defun embrace--pair-struct-to-keys (pair-struct)
   (list (propertize (format "%c" (embrace-pair-struct-key pair-struct))
@@ -708,13 +726,15 @@
   (embrace--commands-to-keys))
 
 (defun embrace--hide-help-buffer ()
-  (and (buffer-live-p embrace--help-buffer)
-       (let ((win (get-buffer-window embrace--help-buffer)))
-         ;; Set `quit-restore' window parameter to fix evil-embrace/#5
-         (set-window-parameter
-          win 'quit-restore
-          (list 'window 'window (selected-window) embrace--help-buffer))
-         (quit-windows-on embrace--help-buffer))))
+  (if (embrace--use-posframe-p)
+      (posframe-hide embrace--help-buffer)
+    (and (buffer-live-p embrace--help-buffer)
+         (let ((win (get-buffer-window embrace--help-buffer)))
+           ;; Set `quit-restore' window parameter to fix evil-embrace/#5
+           (set-window-parameter
+            win 'quit-restore
+            (list 'window 'window (selected-window) embrace--help-buffer))
+           (quit-windows-on embrace--help-buffer)))))
 
 ;; ------------------- ;;
 ;; funcions & commands ;;
